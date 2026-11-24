@@ -29,6 +29,7 @@ type Settings struct {
 }
 type Room struct {
 	ID            string   `json:"id"`
+	OwnerID       string   `json:"owner_id"`
 	Code          string   `json:"code"`
 	Name          string   `json:"name"`
 	State         string   `json:"state"`
@@ -58,17 +59,19 @@ func (r *Room) Enabled(kind string) bool {
 	return false
 }
 
-const roomSelect = "SELECT id,code,name,state,invite,ends_at,closed_at,delete_at,retention,created_at,settings,version,used,reserved,state_revision FROM rooms"
+const roomSelect = "SELECT id,code,name,state,invite,ends_at,closed_at,delete_at,retention,created_at,settings,version,used,reserved,state_revision,owner_id FROM rooms"
 
 type scanner interface{ Scan(...interface{}) error }
 
 func scanRoom(row scanner) (*Room, error) {
 	v := &Room{}
 	var settings string
-	e := row.Scan(&v.ID, &v.Code, &v.Name, &v.State, &v.Invite, &v.EndsAt, &v.ClosedAt, &v.DeleteAt, &v.Retention, &v.CreatedAt, &settings, &v.Version, &v.Used, &v.Reserved, &v.StateRevision)
+	var ownerID sql.NullString
+	e := row.Scan(&v.ID, &v.Code, &v.Name, &v.State, &v.Invite, &v.EndsAt, &v.ClosedAt, &v.DeleteAt, &v.Retention, &v.CreatedAt, &settings, &v.Version, &v.Used, &v.Reserved, &v.StateRevision, &ownerID)
 	if e != nil {
 		return nil, e
 	}
+	v.OwnerID = ownerID.String
 	if e = json.Unmarshal([]byte(settings), &v.Settings); e != nil {
 		return nil, e
 	}
@@ -112,10 +115,17 @@ func defaultSettings() Settings {
 	return Settings{Modules: []string{"photo", "file", "note", "link", "poll", "display"}, Quota: 2 << 30, MaxMembers: 50, DisplayMode: "welcome", Interval: 10}
 }
 func (s *Server) listRooms(w http.ResponseWriter, r *http.Request) {
-	if s.host(w, r) == nil {
+	p := s.host(w, r)
+	if p == nil {
 		return
 	}
-	rows, e := s.db.Query(roomSelect + " ORDER BY created_at DESC")
+	query := roomSelect
+	args := []interface{}{}
+	if p.AccountRole != "admin" {
+		query += " WHERE owner_id=?"
+		args = append(args, p.ID)
+	}
+	rows, e := s.db.Query(query+" ORDER BY created_at DESC", args...)
 	if e != nil {
 		s.internal(w, e)
 		return
@@ -146,7 +156,7 @@ func (s *Server) createRoom(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
-	if !validText(in.Name, 1, 40) || in.Duration < 3600 || in.Duration > 7*86400 || in.Retention < 3600 || in.Retention > 30*86400 {
+	if !validText(in.Name, 1, 40) || in.Duration < 3600 || in.Duration > 30*86400 || in.Retention < 3600 || in.Retention > 30*86400 {
 		apiError(w, 400, "INVALID_INPUT")
 		return
 	}
@@ -184,7 +194,7 @@ func (s *Server) createRoom(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	now := time.Now().Unix()
-	_, e := s.db.Exec("INSERT INTO rooms(id,code,name,invite,ends_at,retention,created_at,settings) VALUES(?,?,?,?,?,?,?,?)", id, code, strings.TrimSpace(in.Name), randomID(24), now+in.Duration, in.Retention, now, string(b))
+	_, e := s.db.Exec("INSERT INTO rooms(id,code,name,invite,ends_at,retention,created_at,settings,owner_id) VALUES(?,?,?,?,?,?,?,?,?)", id, code, strings.TrimSpace(in.Name), randomID(24), now+in.Duration, in.Retention, now, string(b), p.ID)
 	if e != nil {
 		s.internal(w, e)
 		return
@@ -268,7 +278,7 @@ func (s *Server) closeRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, room := s.roomAccess(w, r)
+	_, room := s.roomHost(w, r)
 	if room == nil {
 		return
 	}
@@ -298,16 +308,15 @@ func (s *Server) deleteRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	room, e := s.getRoom(r.PathValue("room"))
-	if e != nil {
-		apiError(w, 404, "ROOM_NOT_FOUND")
+	_, room := s.roomHost(w, r)
+	if room == nil {
 		return
 	}
 	if in.Name != room.Name {
 		apiError(w, 400, "NAME_MISMATCH")
 		return
 	}
-	_, e = s.db.Exec("UPDATE rooms SET state='deleting',delete_at=?,version=version+1 WHERE id=?", time.Now().Unix(), room.ID)
+	_, e := s.db.Exec("UPDATE rooms SET state='deleting',delete_at=?,version=version+1 WHERE id=?", time.Now().Unix(), room.ID)
 	if e != nil {
 		s.internal(w, e)
 		return
@@ -323,7 +332,7 @@ func (s *Server) rotateInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, room := s.roomAccess(w, r)
+	_, room := s.roomHost(w, r)
 	if room == nil {
 		return
 	}
@@ -425,7 +434,7 @@ func (s *Server) updateParticipant(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, room := s.roomAccess(w, r)
+	_, room := s.roomHost(w, r)
 	if room == nil {
 		return
 	}
@@ -450,7 +459,7 @@ func (s *Server) displaySession(w http.ResponseWriter, r *http.Request) {
 	if s.host(w, r) == nil {
 		return
 	}
-	_, room := s.roomAccess(w, r)
+	_, room := s.roomHost(w, r)
 	if room == nil {
 		return
 	}

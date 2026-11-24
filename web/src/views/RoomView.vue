@@ -54,12 +54,12 @@ const {
   refresh,
   start,
 } = useRoomSync(id);
-const filter = ref("all"),
+const filter = ref(route.query.tab === "games" ? "games" : "all"),
   panel = ref(""),
   busy = ref(false),
   confirmName = ref("");
 const screenOpened = ref(false),
-  gamesOpened = ref(false);
+  gamesOpened = ref(route.query.tab === "games");
 const motionDirection = ref(0);
 watch(filter, (value, previous) => {
   const position = (key: string) =>

@@ -6,6 +6,34 @@ async function post(context: BrowserContext, path: string, data: unknown) {
   expect(response.ok(), await response.text()).toBeTruthy();
   return response.json();
 }
+async function act(
+  context: BrowserContext,
+  roomId: string,
+  current: {
+    id: string;
+    version: number;
+    round?: number;
+    phase: string;
+    tie?: boolean;
+  },
+  action: string,
+  extra: Record<string, unknown> = {},
+) {
+  return post(context, `/rooms/${roomId}/games/${current.id}`, {
+    action,
+    version: current.version,
+    game_id: current.id,
+    round: current.round || 0,
+    phase: current.phase,
+    tie: current.tie || false,
+    ...extra,
+  });
+}
+async function getGame(context: BrowserContext, roomId: string, gameId: string) {
+  const response = await context.request.get(`/api/v1/rooms/${roomId}/games/${gameId}`);
+  expect(response.ok(), await response.text()).toBeTruthy();
+  return response.json();
+}
 async function fixture(context: BrowserContext) {
   await post(context, '/login', { username: 'e2e-host', password: 'test-only-strong-password-2026' });
   return post(context, '/rooms', { name: '周末相聚 A room with a longer name', duration: 7200, retention: 86400 });
@@ -53,7 +81,7 @@ test('responsive bilingual UI: routes, navigation, alignment and dialog accessib
           await expect(gp.locator('.guest-bottom')).toBeVisible({ visible: width <= 640 });
           const nav = gp.locator(width <= 640 ? '.guest-bottom' : '.tabs');
           await nav.getByRole('button', { name: locale === 'zh' ? '游戏' : 'Games', exact: true }).click();
-          await expect(gp.locator('.game-library')).toBeVisible();
+          await expect(gp.locator('.game-library').first()).toBeVisible();
           await noOverflow(gp);
           await nav.getByRole('button', { name: locale === 'zh' ? '投屏' : 'Screen sharing', exact: true }).click();
           await expect(gp.locator('.screen-empty')).toBeVisible();
@@ -92,7 +120,7 @@ test('responsive bilingual UI: routes, navigation, alignment and dialog accessib
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Settings', exact: true }).last()).toBeFocused();
     await page.locator('.tabs').getByRole('button', { name: 'Games', exact: true }).click();
-    await page.locator('.game-library').waitFor();
+    await page.locator('.game-library').first().waitFor();
     await accessible(page);
     await page.locator('.tabs').getByRole('button', { name: 'Screen sharing', exact: true }).click();
     await page.locator('.screen-empty').waitFor();
@@ -143,10 +171,11 @@ test('game choices survive sync, need confirmation, and private words conceal on
       const guest = await browser.newContext({ baseURL }); guests.push(guest);
       await post(guest, '/join', { code: room.code, name: 'Guest ' + i });
     }
-    const path = '/rooms/' + room.id + '/game';
-    let game = await post(context, path, { action: 'create', kind: 'dice', language: 'en', version: 0 });
-    for (const c of [context, guests[0]]) game = await post(c, path, { action: 'join', version: game.version });
-    game = await post(context, path, { action: 'start', version: game.version });
+    const collection = '/rooms/' + room.id + '/games';
+    let game = await post(context, collection, { action: 'create', kind: 'dice', language: 'en' });
+    let path = collection + '/' + game.id;
+    for (const c of [context, guests[0]]) game = await act(c, room.id, game, 'join');
+    game = await act(context, room.id, game, 'start');
     await page.goto('/room/' + room.id);
     await page.locator('#language').selectOption('en');
     await page.locator('.tabs').getByRole('button', { name: 'Games', exact: true }).click();
@@ -154,16 +183,18 @@ test('game choices survive sync, need confirmation, and private words conceal on
     const synced = page.waitForResponse(r => r.url().endsWith(path) && r.request().method() === 'GET');
     await synced;
     await expect(page.getByRole('button', { name: 'Guess 3', exact: true })).toHaveAttribute('aria-pressed', 'true');
-    let state = await (await context.request.get('/api/v1' + path)).json();
+    let state = await getGame(context, room.id, game.id);
     expect(state.mine.guess).toBeFalsy();
     await accessible(page);
     await page.getByRole('button', { name: 'Confirm choice', exact: true }).click();
-    await expect.poll(async () => (await (await context.request.get('/api/v1' + path)).json()).mine.guess).toBe(3);
-    state = await (await context.request.get('/api/v1' + path)).json();
-    game = await post(context, path, { action: 'cancel', version: state.version });
-    game = await post(context, path, { action: 'create', kind: 'undercover', language: 'en', version: game.version });
-    for (const c of [context, ...guests]) game = await post(c, path, { action: 'join', version: game.version });
-    await post(context, path, { action: 'start', version: game.version });
+    await expect.poll(async () => (await getGame(context, room.id, game.id)).mine.guess).toBe(3);
+    state = await getGame(context, room.id, game.id);
+    await act(context, room.id, state, 'cancel');
+    game = await post(context, collection, { action: 'create', kind: 'undercover', language: 'en' });
+    path = collection + '/' + game.id;
+    for (const c of [context, ...guests]) game = await act(c, room.id, game, 'join');
+    game = await act(context, room.id, game, 'start');
+    await page.locator('.game-instance-select[data-kind="undercover"]').selectOption(game.id);
     await page.getByRole('button', { name: 'Show my word', exact: true }).click();
     await expect(page.locator('.secret-word strong')).toBeVisible();
     await page.waitForResponse(r => r.url().endsWith(path) && r.request().method() === 'GET');
@@ -175,3 +206,56 @@ test('game choices survive sync, need confirmation, and private words conceal on
   } finally { await Promise.all(guests.map(g => g.close())); }
 });
 
+test('two dice games keep independent guesses and versions', async ({ context, page, browser, baseURL }) => {
+  const room = await fixture(context);
+  const guest = await browser.newContext({ baseURL });
+  try {
+    await post(guest, '/join', { code: room.code, name: 'Second dice guest' });
+    const collection = '/rooms/' + room.id + '/games';
+    let first = await post(context, collection, { action: 'create', kind: 'dice', language: 'en' });
+    for (const c of [context, guest]) first = await act(c, room.id, first, 'join');
+    first = await act(context, room.id, first, 'start');
+    expect(first.phase).toBe('guess');
+
+    await page.goto('/room/' + room.id);
+    await page.locator('#language').selectOption('en');
+    await page.locator('.tabs').getByRole('button', { name: 'Games', exact: true }).click();
+    const diceEntry = page.locator('.game-library article').filter({
+      has: page.getByRole('heading', { name: 'Guess the dice', exact: true }),
+    });
+    const createButton = diceEntry.getByRole('button', { name: 'Create game', exact: true });
+    await expect(createButton).toBeEnabled();
+    const creating = page.waitForResponse(r => r.url().endsWith(collection) && r.request().method() === 'POST');
+    await createButton.click();
+    const createdResponse = await creating;
+    expect(createdResponse.ok(), await createdResponse.text()).toBeTruthy();
+    let second = await createdResponse.json();
+    expect(second.id).not.toBe(first.id);
+    const firstAfterCreate = await getGame(context, room.id, first.id);
+    expect(firstAfterCreate.version).toBe(first.version);
+    expect(firstAfterCreate.phase).toBe('guess');
+
+    for (const c of [context, guest]) second = await act(c, room.id, second, 'join');
+    second = await act(context, room.id, second, 'start');
+    expect(second.phase).toBe('guess');
+    const selector = page.locator('.game-instance-select[data-kind="dice"]');
+    const secondBeforeFirstGuess = await getGame(context, room.id, second.id);
+    await selector.selectOption(first.id);
+    await page.getByRole('button', { name: 'Guess 3', exact: true }).click();
+    await page.getByRole('button', { name: 'Confirm choice', exact: true }).click();
+    await expect.poll(async () => (await getGame(context, room.id, first.id)).mine.guess).toBe(3);
+    expect((await getGame(context, room.id, second.id)).version).toBe(secondBeforeFirstGuess.version);
+
+    const firstBeforeSecondGuess = await getGame(context, room.id, first.id);
+    await selector.selectOption(second.id);
+    await page.getByRole('button', { name: 'Guess 5', exact: true }).click();
+    await page.getByRole('button', { name: 'Confirm choice', exact: true }).click();
+    await expect.poll(async () => (await getGame(context, room.id, second.id)).mine.guess).toBe(5);
+    const firstAfterSecondGuess = await getGame(context, room.id, first.id);
+    expect(firstAfterSecondGuess.version).toBe(firstBeforeSecondGuess.version);
+    expect(firstAfterSecondGuess.mine.guess).toBe(3);
+    expect((await getGame(context, room.id, second.id)).version).toBeGreaterThan(second.version);
+  } finally {
+    await guest.close();
+  }
+});

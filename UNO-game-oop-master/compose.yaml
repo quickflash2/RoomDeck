@@ -1,0 +1,13 @@
+services:
+  uno-web:
+    build: .
+    container_name: uno-web
+    ports:
+      - "127.0.0.1:8081:80"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s

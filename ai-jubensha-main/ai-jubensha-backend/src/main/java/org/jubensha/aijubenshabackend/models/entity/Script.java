@@ -1,0 +1,67 @@
+package org.jubensha.aijubenshabackend.models.entity;
+
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.jubensha.aijubenshabackend.models.enums.DifficultyLevel;
+
+import java.io.Serializable;
+import java.time.LocalDateTime;
+
+@Data
+@Entity
+@Table(name = "scripts")
+@Builder
+@AllArgsConstructor
+@NoArgsConstructor
+public class Script implements Serializable {
+    
+    private static final long serialVersionUID = 1L;
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    private String name;
+
+    // 包含剧本内容
+    @Column(columnDefinition = "LONGTEXT")
+    private String description;
+
+    private String author;
+
+    @Enumerated(EnumType.STRING)
+    private DifficultyLevel difficulty;
+
+    private Integer duration;
+
+    private Integer playerCount;
+
+    @Column(length = 2048)
+    private String coverImageUrl;
+
+    @Column(columnDefinition = "TEXT")
+    private String timeline;
+
+    private LocalDateTime createTime;
+
+    private LocalDateTime updateTime;
+
+    @PrePersist
+    protected void onCreate() {
+        createTime = LocalDateTime.now();
+        updateTime = LocalDateTime.now();
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        updateTime = LocalDateTime.now();
+    }
+    
+    @Override
+    public String toString() {
+        return "Script{id=" + id + ", name='" + name + "', author='" + author + "'}";
+    }
+}

@@ -51,6 +51,32 @@
 .game-library small {
   color: var(--muted);
 }
+.game-library .uno-player-count {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.game-library .uno-player-count select {
+  width: auto;
+  min-width: 112px;
+  margin: 0;
+}
+.game-instance-picker {
+  margin-top: 14px;
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.game-instance-picker select {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
 .game-session {
   margin: 24px 0 0;
   padding: 24px;

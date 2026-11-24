@@ -4,6 +4,7 @@ import App from "./App.vue";
 import { i18n } from "./i18n";
 import HomeView from "./views/HomeView.vue";
 import AuthView from "./views/AuthView.vue";
+import AdminUsersView from "./views/AdminUsersView.vue";
 import JoinView from "./views/JoinView.vue";
 import RoomView from "./views/RoomView.vue";
 import DisplayView from "./views/DisplayView.vue";
@@ -20,8 +21,17 @@ const router = createRouter({
     { path: "/", component: HomeView },
     { path: "/login", component: AuthView },
     { path: "/setup", component: AuthView },
+    { path: "/admin/users", component: AdminUsersView },
     { path: "/join", component: JoinView },
     { path: "/room/:id", component: RoomView },
+    {
+      path: "/room/:id/uno/:gameId?",
+      component: () => import("./views/UnoView.vue"),
+    },
+    {
+      path: "/room/:id/guandan",
+      component: () => import("./views/GuanDanView.vue"),
+    },
     { path: "/display/:id?", component: DisplayView },
     { path: "/:pathMatch(.*)*", redirect: "/" },
   ],

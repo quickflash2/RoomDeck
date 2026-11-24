@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#121816" />
+    <meta name="description" content="基于原 UNO OOP 项目改造的浏览器经典人机对战游戏" />
+    <title>UNO · 经典人机对战</title>
+    <link rel="icon" href="/UNO2D/star.png" />
+    <link rel="stylesheet" href="./styles.css?v=20261120" />
+  </head>
+  <body>
+    <main id="app">
+      <section id="setup-screen" class="setup-screen">
+        <div class="setup-orb setup-orb-red"></div>
+        <div class="setup-orb setup-orb-yellow"></div>
+        <div class="setup-content">
+          <div class="hero">
+            <p class="eyebrow">THE CLASSIC CARD GAME</p>
+            <img class="hero-logo" src="/UNO2D/back.jpg" alt="UNO 经典卡牌" />
+            <h1>最后一句话，<br /><span>留给 UNO。</span></h1>
+            <p class="hero-description">匹配颜色与数字，巧用功能牌。与 AI 来一局轻快的经典 UNO。</p>
+            <div class="feature-row" aria-label="游戏特点">
+              <span>2–8 人对局</span>
+              <span>经典规则</span>
+              <span>无需注册</span>
+            </div>
+          </div>
+
+          <form id="setup-form" class="setup-card">
+            <div class="setup-card-heading">
+              <p class="eyebrow">NEW GAME</p>
+              <h2>创建一桌游戏</h2>
+              <p>你将对战 1–7 位 AI 玩家</p>
+            </div>
+            <label class="field-label" for="player-name">你的昵称</label>
+            <input id="player-name" class="text-input" name="playerName" value="玩家" maxlength="12" autocomplete="off" required />
+
+            <div class="count-heading">
+              <label class="field-label" for="player-count">对局人数</label>
+              <output id="player-count-value" for="player-count">4 人</output>
+            </div>
+            <input id="player-count" name="playerCount" type="range" min="2" max="8" value="4" step="1" />
+            <div class="range-labels" aria-hidden="true"><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div>
+
+            <button class="primary-button start-button" type="submit">
+              <span>开始游戏</span><span aria-hidden="true">→</span>
+            </button>
+            <p class="setup-footnote">每人 7 张起手牌 · 先将手牌出完者获胜</p>
+          </form>
+        </div>
+      </section>
+
+      <section id="game-screen" class="game-screen is-hidden" aria-label="UNO 游戏牌桌">
+        <header class="game-topbar">
+          <div class="mini-brand" aria-label="UNO">UNO<span>!</span></div>
+          <div class="game-mode"><span class="live-dot"></span>经典人机对战</div>
+          <div class="topbar-actions">
+            <button id="rules-button" class="text-button" type="button">规则</button>
+            <button id="restart-button" class="text-button" type="button">重新开局</button>
+            <button id="exit-button" class="text-button" type="button">返回首页</button>
+          </div>
+        </header>
+
+        <div class="game-layout">
+          <section class="table-panel">
+            <div id="table" class="table">
+              <div id="seats" class="seats"></div>
+              <div class="center-area">
+                <div id="direction-indicator" class="direction-indicator" title="出牌方向">↻ 顺时针</div>
+                <div class="piles">
+                  <button id="draw-pile" class="pile-button" type="button" aria-label="抽一张牌">
+                    <img src="/UNO2D/Cardback.jpg" alt="抽牌堆" />
+                    <span class="pile-count"><strong id="deck-count">0</strong> 张</span>
+                  </button>
+                  <div class="discard-pile" aria-label="弃牌堆顶牌">
+                    <img id="discard-card" src="/UNO2D/Cardback.jpg" alt="当前顶牌" />
+                    <span class="pile-count">当前牌</span>
+                  </div>
+                </div>
+                <div class="current-color">当前颜色 <span id="color-dot" class="color-dot"></span><strong id="current-color-name">红色</strong></div>
+              </div>
+              <div id="turn-banner" class="turn-banner">轮到你出牌</div>
+            </div>
+          </section>
+
+          <aside class="side-panel">
+            <section class="status-card">
+              <p class="eyebrow">ROUND <span id="turn-number">1</span></p>
+              <h2 id="status-title">你的回合</h2>
+              <p id="status-description">选择一张高亮卡牌，或从牌堆抽牌。</p>
+              <div class="status-stats">
+                <div><strong id="human-card-count">7</strong><span>你的手牌</span></div>
+                <div><strong id="remaining-player-count">4</strong><span>对局人数</span></div>
+              </div>
+            </section>
+            <section class="activity-card">
+              <h3>对局动态</h3>
+              <ol id="activity-log" class="activity-log"></ol>
+            </section>
+          </aside>
+        </div>
+
+        <section class="hand-dock" aria-label="你的手牌">
+          <div class="hand-heading">
+            <div><p class="eyebrow">YOUR HAND</p><h2>你的手牌</h2></div>
+            <div class="hand-actions">
+              <button id="uno-button" class="uno-button" type="button" disabled>喊 UNO!</button>
+              <button id="pass-button" class="secondary-button is-hidden" type="button">结束回合</button>
+            </div>
+          </div>
+          <div id="hand" class="hand" role="group" aria-label="可操作的卡牌"></div>
+          <p id="action-hint" class="action-hint" aria-live="polite">轮到你时，高亮卡牌可以打出。</p>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="color-dialog" class="modal color-modal">
+      <p class="eyebrow">WILD CARD</p>
+      <h2>选择接下来的颜色</h2>
+      <p>万能牌将以你选择的颜色继续游戏</p>
+      <div class="color-options">
+        <button class="color-choice color-red" data-color="red" type="button"><span></span>红色</button>
+        <button class="color-choice color-yellow" data-color="yellow" type="button"><span></span>黄色</button>
+        <button class="color-choice color-blue" data-color="blue" type="button"><span></span>蓝色</button>
+        <button class="color-choice color-green" data-color="green" type="button"><span></span>绿色</button>
+      </div>
+    </dialog>
+
+    <dialog id="result-dialog" class="modal result-modal">
+      <p class="eyebrow">GAME OVER</p>
+      <div id="result-mark" class="result-mark">UNO!</div>
+      <h2 id="result-title">你赢了！</h2>
+      <p id="result-description">漂亮的一局。</p>
+      <div class="result-actions">
+        <button id="play-again-button" class="primary-button" type="button">再来一局</button>
+        <button id="result-home-button" class="secondary-button" type="button">返回首页</button>
+      </div>
+    </dialog>
+
+    <dialog id="rules-dialog" class="modal rules-modal">
+      <p class="eyebrow">HOW TO PLAY</p>
+      <h2>经典 UNO 规则</h2>
+      <ul>
+        <li>打出与当前颜色、数字或功能相同的牌；黑色万能牌可改变颜色。</li>
+        <li>Skip 跳过下家，Reverse 反转方向，Draw Two 让下家抽两张并跳过。</li>
+        <li>Wild Draw Four 只能在没有当前颜色手牌时打出，下家抽四张并跳过。</li>
+        <li>抽牌后，只能打出刚抽到且合法的牌，或点击“结束回合”。</li>
+        <li>打出倒数第二张牌前点击“喊 UNO”，否则自动罚抽两张。</li>
+        <li>双人局中 Reverse 等同 Skip；最先出完手牌的人获胜。</li>
+      </ul>
+      <button id="close-rules-button" class="primary-button" type="button">知道了</button>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="./js/app.mjs?v=20261120"></script>
+  </body>
+</html>

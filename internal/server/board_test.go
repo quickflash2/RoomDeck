@@ -52,7 +52,7 @@ func TestCohostScopesAndRevocation(t *testing.T) {
 	update["settings"] = settings
 	update["version"] = room.Version
 	f.request(t, f.guest, "PATCH", f.path(""), update, 403, nil)
-	f.request(t, f.guest, "POST", f.path("/game"), gameCommand{Action: "create", Kind: "dice", Language: "en"}, 200, nil)
+	f.request(t, f.guest, "POST", f.path("/games"), gameCommand{Action: "create", Kind: "dice", Language: "en"}, 200, nil)
 	f.request(t, f.host, "PUT", permissions, map[string]interface{}{"permissions": []string{}}, 200, nil)
 	f.request(t, f.guest, "PATCH", f.path("/contents/"+c.ID), map[string]bool{"visible": true}, 403, nil)
 	f.request(t, f.guest, "POST", f.path("/board"), boardCommand{Action: "create", Epoch: 1, Language: "zh"}, 403, nil)

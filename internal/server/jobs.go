@@ -47,7 +47,7 @@ func (s *Server) createExport(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, room := s.roomAccess(w, r)
+	_, room := s.roomHost(w, r)
 	if room == nil {
 		return
 	}
@@ -317,7 +317,7 @@ func (s *Server) downloadExport(w http.ResponseWriter, r *http.Request) {
 	if s.host(w, r) == nil {
 		return
 	}
-	_, room := s.roomAccess(w, r)
+	_, room := s.roomHost(w, r)
 	if room == nil {
 		return
 	}
@@ -349,6 +349,29 @@ func (s *Server) cleanup() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now().Unix()
+	expiredGameRooms := map[string]struct{}{}
+	for _, query := range []string{
+		"DELETE FROM games WHERE kind='uno' AND human_joined_at=0 AND created_at<=? RETURNING room_id",
+		"DELETE FROM guandan_games WHERE closed_at=0 AND human_joined_at=0 AND created_at<=? RETURNING room_id",
+	} {
+		rows, queryErr := s.db.Query(query, now-5*60)
+		if queryErr != nil {
+			log.Printf("cleanup unjoined games: %v", queryErr)
+			continue
+		}
+		for rows.Next() {
+			var roomID string
+			if scanErr := rows.Scan(&roomID); scanErr != nil {
+				log.Printf("cleanup unjoined games: %v", scanErr)
+				continue
+			}
+			expiredGameRooms[roomID] = struct{}{}
+		}
+		rows.Close()
+	}
+	for roomID := range expiredGameRooms {
+		s.hub.notify(roomID)
+	}
 	_, e := s.db.Exec("UPDATE rooms SET state='closed',closed_at=ends_at,delete_at=ends_at+retention,version=version+1 WHERE state='active' AND ends_at<=?", now)
 	if e != nil {
 		log.Printf("cleanup: %v", e)

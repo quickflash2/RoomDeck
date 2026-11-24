@@ -1,0 +1,11 @@
+.git
+.trae
+backend
+document
+tests
+src/source
+src/header
+src/UNO.pro
+src/UNO.pro.user
+src/mainwindow.ui
+*.pdf

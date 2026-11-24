@@ -1,0 +1,105 @@
+package org.jubensha.aijubenshabackend.ai.guardrail;
+
+
+/**
+ * 提示词安全输入护轨
+ *
+ * @author Zewang
+ * @version 1.0
+ * @date 2026-01-30 21:31
+ * @since 2026
+ */
+
+import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.guardrail.InputGuardrail;
+import dev.langchain4j.guardrail.InputGuardrailResult;
+
+import java.util.Arrays;
+import java.util.List;
+import java.util.regex.Pattern;
+
+/**
+ * Prompt 安全审查护轨
+ */
+public class PromptSafetyInputGuardrail implements InputGuardrail {
+
+    // 敏感词列表
+    private static final List<String> SENSITIVE_WORDS = Arrays.asList(
+            "忽略之前的指令", "ignore previous instructions", "ignore above",
+            "破解", "hack", "绕过", "bypass", "越狱", "jailbreak"
+    );
+
+    // 注入攻击模式
+    private static final List<Pattern> INJECTION_PATTERNS = Arrays.asList(
+            Pattern.compile("(?i)ignore\\s+(?:previous|above|all)\\s+(?:instructions?|commands?|prompts?)"),
+            Pattern.compile("(?i)(?:forget|disregard)\\s+(?:everything|all)\\s+(?:above|before)"),
+            Pattern.compile("(?i)(?:pretend|act|behave)\\s+(?:as|like)\\s+(?:if|you\\s+are)"),
+            Pattern.compile("(?i)system\\s*:\\s*you\\s+are"),
+            Pattern.compile("(?i)new\\s+(?:instructions?|commands?|prompts?)\\s*:")
+    );
+
+    @Override
+    public InputGuardrailResult validate(UserMessage userMessage) {
+        String input = userMessage.singleText();
+        // 检查输入长度
+        if (input.length() > 10000) {
+            return fatal("输入内容过长，不要超过 1000 字");
+        }
+        // 检查是否为空
+        if (input.trim().isEmpty()) {
+            return fatal("输入内容不能为空");
+        }
+        
+        // 检查是否是正常的AI生成内容
+        if (isNormalAIGeneratedContent(input)) {
+            // 如果是正常的AI生成内容，直接通过验证
+            return success();
+        }
+        
+        // 检查敏感词
+        String lowerInput = input.toLowerCase();
+        for (String sensitiveWord : SENSITIVE_WORDS) {
+            if (lowerInput.contains(sensitiveWord.toLowerCase())) {
+                return fatal("输入包含不当内容，请修改后重试");
+            }
+        }
+        // 检查注入攻击模式
+        for (Pattern pattern : INJECTION_PATTERNS) {
+            if (pattern.matcher(input).find()) {
+                return fatal("检测到恶意输入，请求被拒绝");
+            }
+        }
+        return success();
+    }
+    
+    /**
+     * 检查是否是正常的AI生成内容
+     * @param input 输入内容
+     * @return 是否是正常的AI生成内容
+     */
+    private boolean isNormalAIGeneratedContent(String input) {
+        // 检查是否包含JSON格式特征
+        if (input.contains("{") && input.contains("}") && input.contains(":")) {
+            return true;
+        }
+        
+        // 检查是否包含剧本杀相关术语
+        String[] jubenShaTerms = {
+            "剧本", "角色", "线索", "推理", "凶手", "真相", 
+            "剧情", "背景", "动机", "手法", "不在场证明"
+        };
+        
+        int termCount = 0;
+        for (String term : jubenShaTerms) {
+            if (input.contains(term)) {
+                termCount++;
+                if (termCount >= 2) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+
+}

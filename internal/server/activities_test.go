@@ -72,14 +72,18 @@ func TestDiceRoundSecrecyAndDuplicate(t *testing.T) {
 	f := newFixture(t)
 	var g gameState
 	action := func(c *http.Client, a string, guess int) {
-		f.request(t, c, "POST", f.path("/game"), gameCommand{Action: a, Version: g.Version, Kind: "dice", Language: "en", Guess: guess}, 200, &g)
+		path := f.path("/games")
+		if a != "create" {
+			path = f.path("/games/" + g.ID)
+		}
+		f.request(t, c, "POST", path, gameCommand{Action: a, GameID: g.ID, Round: g.Round, Phase: g.Phase, Tie: g.Tie, Version: g.Version, Kind: "dice", Language: "en", Guess: guess}, 200, &g)
 	}
 	action(f.host, "create", 0)
 	action(f.host, "join", 0)
 	action(f.guest, "join", 0)
 	action(f.host, "start", 0)
 	action(f.host, "guess", 3)
-	raw := f.request(t, f.guest, "GET", f.path("/game"), nil, 200, nil)
+	raw := f.request(t, f.guest, "GET", f.path("/games/"+g.ID), nil, 200, nil)
 	if strings.Contains(string(raw), `"guess":3`) {
 		t.Fatal("other guess leaked")
 	}
@@ -88,9 +92,9 @@ func TestDiceRoundSecrecyAndDuplicate(t *testing.T) {
 	if g.Phase != "result" || g.Die < 1 || g.Die > 6 {
 		t.Fatal("invalid roll", g)
 	}
-	f.request(t, f.guest, "POST", f.path("/game"), gameCommand{Action: "guess", Version: old, Guess: 4}, 409, nil)
+	f.request(t, f.guest, "POST", f.path("/games/"+g.ID), gameCommand{Action: "guess", GameID: g.ID, Version: old, Guess: 4}, 409, nil)
 	before := g.Die
-	f.request(t, f.host, "GET", f.path("/game"), nil, 200, &g)
+	f.request(t, f.host, "GET", f.path("/games/"+g.ID), nil, 200, &g)
 	if g.Die != before {
 		t.Fatal("duplicate rolled again")
 	}
@@ -99,7 +103,7 @@ func TestDiceRoundSecrecyAndDuplicate(t *testing.T) {
 		t.Fatal("new round not reset")
 	}
 	f.request(t, f.host, "POST", f.path("/close"), nil, 200, nil)
-	f.request(t, f.host, "POST", f.path("/game"), gameCommand{Action: "guess", Version: g.Version, Guess: 1}, 409, nil)
+	f.request(t, f.host, "POST", f.path("/games/"+g.ID), gameCommand{Action: "guess", GameID: g.ID, Version: g.Version, Guess: 1}, 409, nil)
 }
 func TestUndercoverPrivateViewsAndWin(t *testing.T) {
 	f := newFixture(t)
@@ -109,14 +113,18 @@ func TestUndercoverPrivateViewsAndWin(t *testing.T) {
 	}
 	var g gameState
 	action := func(c *http.Client, a, target string) {
-		f.request(t, c, "POST", f.path("/game"), gameCommand{Action: a, Target: target, Version: g.Version, Kind: "undercover", Language: "zh"}, 200, &g)
+		path := f.path("/games")
+		if a != "create" {
+			path = f.path("/games/" + g.ID)
+		}
+		f.request(t, c, "POST", path, gameCommand{Action: a, GameID: g.ID, Round: g.Round, Phase: g.Phase, Tie: g.Tie, Target: target, Version: g.Version, Kind: "undercover", Language: "zh"}, 200, &g)
 	}
 	action(f.host, "create", "")
 	for _, c := range clients {
 		action(c, "join", "")
 	}
 	action(f.host, "start", "")
-	stored, err := f.s.loadGame(f.room.ID)
+	stored, err := f.s.loadGame(f.room.ID, g.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +138,7 @@ func TestUndercoverPrivateViewsAndWin(t *testing.T) {
 		t.Fatal("no spy")
 	}
 	for _, c := range clients {
-		raw := f.request(t, c, "GET", f.path("/game"), nil, 200, nil)
+		raw := f.request(t, c, "GET", f.path("/games/"+g.ID), nil, 200, nil)
 		if strings.Contains(string(raw), `"spy"`) {
 			t.Fatal("role leaked")
 		}
@@ -183,18 +191,22 @@ func TestConcurrentGuessesAndRemovedSeat(t *testing.T) {
 		c      *http.Client
 		action string
 	}{{f.host, "create"}, {f.host, "join"}, {f.guest, "join"}, {f.host, "start"}} {
-		f.request(t, a.c, "POST", f.path("/game"), gameCommand{Action: a.action, Kind: "dice", Language: "en", Version: g.Version}, 200, &g)
+		path := f.path("/games")
+		if a.action != "create" {
+			path = f.path("/games/" + g.ID)
+		}
+		f.request(t, a.c, "POST", path, gameCommand{Action: a.action, GameID: g.ID, Round: g.Round, Phase: g.Phase, Tie: g.Tie, Kind: "dice", Language: "en", Version: g.Version}, 200, &g)
 	}
 	command := gameCommand{Action: "guess", GameID: g.ID, Round: g.Round, Phase: g.Phase, Version: g.Version, Guess: 2}
-	f.request(t, f.host, "POST", f.path("/game"), command, 200, nil)
-	f.request(t, f.guest, "POST", f.path("/game"), command, 200, &g)
+	f.request(t, f.host, "POST", f.path("/games/"+g.ID), command, 200, nil)
+	f.request(t, f.guest, "POST", f.path("/games/"+g.ID), command, 200, &g)
 	if g.Phase != "result" {
 		t.Fatal("concurrent guesses rejected")
 	}
-	f.request(t, f.host, "POST", f.path("/game"), gameCommand{Action: "round", Version: g.Version}, 200, &g)
-	f.request(t, f.host, "POST", f.path("/game"), command, 409, nil)
+	f.request(t, f.host, "POST", f.path("/games/"+g.ID), gameCommand{Action: "round", GameID: g.ID, Version: g.Version}, 200, &g)
+	f.request(t, f.host, "POST", f.path("/games/"+g.ID), command, 409, nil)
 	_, _ = f.s.db.Exec("UPDATE participants SET revoked=1 WHERE room_id=?", f.room.ID)
-	f.request(t, f.host, "GET", f.path("/game"), nil, 200, &g)
+	f.request(t, f.host, "GET", f.path("/games/"+g.ID), nil, 200, &g)
 	if g.Phase != "finished" || g.Result != "cancelled" {
 		t.Fatal("removed player blocked the game")
 	}
@@ -207,9 +219,13 @@ func TestGameSurvivesRestartAndDisplayHasNoSecrets(t *testing.T) {
 		c      *http.Client
 		action string
 	}{{f.host, "create"}, {f.host, "join"}, {f.guest, "join"}, {f.host, "start"}, {f.host, "guess"}} {
-		f.request(t, a.c, "POST", f.path("/game"), gameCommand{Action: a.action, Kind: "dice", Language: "en", Guess: 6, Version: g.Version}, 200, &g)
+		path := f.path("/games")
+		if a.action != "create" {
+			path = f.path("/games/" + g.ID)
+		}
+		f.request(t, a.c, "POST", path, gameCommand{Action: a.action, GameID: g.ID, Round: g.Round, Phase: g.Phase, Tie: g.Tie, Kind: "dice", Language: "en", Guess: 6, Version: g.Version}, 200, &g)
 	}
-	stored, err := f.s.loadGame(f.room.ID)
+	stored, err := f.s.loadGame(f.room.ID, g.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +240,7 @@ func TestGameSurvivesRestartAndDisplayHasNoSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer next.Close()
-	reopened, err := next.loadGame(f.room.ID)
+	reopened, err := next.loadGame(f.room.ID, g.ID)
 	if err != nil || reopened.ID != stored.ID || reopened.Players[0].Guess != 6 || reopened.Phase != "guess" {
 		t.Fatal("game did not survive restart", err)
 	}

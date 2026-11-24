@@ -14,17 +14,21 @@ import (
 
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	var n int
-	if e := s.db.QueryRow("SELECT COUNT(*) FROM admins").Scan(&n); e != nil {
+	if e := s.db.QueryRow("SELECT COUNT(*) FROM admins WHERE role='admin'").Scan(&n); e != nil {
 		s.internal(w, e)
 		return
 	}
 	p := s.identity(r, "host")
+	role := ""
+	if p != nil {
+		role = p.AccountRole
+	}
 	writeJSON(w, 200, map[string]interface{}{"setup_required": n == 0, "authenticated": p != nil, "username": func() string {
 		if p != nil {
 			return p.Name
 		}
 		return ""
-	}(), "base_url": s.config.BaseURL})
+	}(), "role": role, "base_url": s.config.BaseURL})
 }
 func (s *Server) setup(w http.ResponseWriter, r *http.Request) {
 	if s.limited(r, "setup", 5) {
@@ -55,7 +59,7 @@ func (s *Server) setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := randomID(16)
-	_, e = s.db.Exec("INSERT INTO admins VALUES(?,?,?)", id, strings.TrimSpace(in.Username), hashed)
+	_, e = s.db.Exec("INSERT INTO admins(id,username,password,role) VALUES(?,?,?,'admin')", id, strings.TrimSpace(in.Username), hashed)
 	if e != nil {
 		s.internal(w, e)
 		return
@@ -123,7 +127,7 @@ func (s *Server) identity(r *http.Request, role string) *principal {
 		return nil
 	}
 	if role == "host" {
-		e = s.db.QueryRow("SELECT username FROM admins WHERE id=?", p.ID).Scan(&p.Name)
+		e = s.db.QueryRow("SELECT username,role FROM admins WHERE id=?", p.ID).Scan(&p.Name, &p.AccountRole)
 	} else if role == "guest" {
 		e = s.db.QueryRow("SELECT name FROM participants WHERE id=? AND revoked=0", p.ID).Scan(&p.Name)
 	}
@@ -138,6 +142,20 @@ func (s *Server) host(w http.ResponseWriter, r *http.Request) *principal {
 		apiError(w, 401, "AUTH_REQUIRED")
 	}
 	return p
+}
+func canManageRoom(p *principal, room *Room) bool {
+	return p != nil && p.Role == "host" && (p.AccountRole == "admin" || room.OwnerID != "" && room.OwnerID == p.ID)
+}
+func (s *Server) roomHost(w http.ResponseWriter, r *http.Request) (*principal, *Room) {
+	p, room := s.roomAccess(w, r)
+	if p == nil {
+		return nil, nil
+	}
+	if !canManageRoom(p, room) {
+		apiError(w, 403, "FORBIDDEN")
+		return nil, nil
+	}
+	return p, room
 }
 func (s *Server) roomAccess(w http.ResponseWriter, r *http.Request) (*principal, *Room) {
 	room, e := s.getRoom(r.PathValue("room"))
@@ -157,13 +175,28 @@ func (s *Server) roomAccess(w http.ResponseWriter, r *http.Request) (*principal,
 	if r.URL.Query().Get("display") == "1" {
 		roles = []string{"display"}
 	}
+	authenticated := false
 	for _, role := range roles {
 		p := s.identity(r, role)
-		if p != nil && (p.Role == "host" || p.RoomID == room.ID) {
+		if p == nil {
+			continue
+		}
+		authenticated = true
+		if p.Role == "host" {
+			if canManageRoom(p, room) {
+				return p, room
+			}
+			continue
+		}
+		if p.RoomID == room.ID {
 			return p, room
 		}
 	}
-	apiError(w, 401, "AUTH_REQUIRED")
+	if authenticated {
+		apiError(w, 403, "FORBIDDEN")
+	} else {
+		apiError(w, 401, "AUTH_REQUIRED")
+	}
 	return nil, nil
 }
 func (s *Server) canWrite(w http.ResponseWriter, p *principal, room *Room) bool {

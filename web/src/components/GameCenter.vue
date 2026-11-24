@@ -1,33 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { Dices, Fingerprint, Users, Check, Eye, EyeOff } from "lucide-vue-next";
-import { api, errorCode, notify } from "../api";
-interface Player {
-  id: string;
-  name: string;
-  alive: boolean;
-  score: number;
-  submitted: boolean;
-  word?: string;
-  spy?: boolean;
-  guess?: number;
-}
-interface Game {
-  id: string;
-  kind: string;
-  phase: string;
-  language: string;
-  version: number;
-  round: number;
-  turn: number;
-  players: Player[];
-  candidates: string[];
-  tie: boolean;
-  result: string;
-  die: number;
-  mine?: { word: string; guess: number; vote: string };
-}
+import { useRouter } from "vue-router";
+import {
+  Dices,
+  Fingerprint,
+  Users,
+  Check,
+  Eye,
+  EyeOff,
+  Spade,
+  Layers,
+} from "lucide-vue-next";
+import { useGameList, useGameSession } from "../useGameSession";
 const props = defineProps<{
   roomId: string;
   myId: string;
@@ -36,15 +21,49 @@ const props = defineProps<{
   visible?: boolean;
 }>();
 const { t, locale } = useI18n();
-const game = ref<Game | null>(null),
-  busy = ref(false),
-  loaded = ref(false),
-  failed = ref(false),
-  reveal = ref(false),
+const router = useRouter();
+const visible = computed(() => props.visible !== false);
+const selectedGameId = ref<string | null>(null);
+const {
+  game,
+  busy,
+  failed: gameFailed,
+  refresh: refreshGame,
+  act: sessionAct,
+} = useGameSession(() => props.roomId, selectedGameId, visible);
+const {
+  games,
+  busy: creating,
+  loaded,
+  failed: listFailed,
+  refresh: refreshList,
+  create,
+} = useGameList(() => props.roomId, "", visible);
+const reveal = ref(false),
   language = ref(locale.value.startsWith("zh") ? "zh" : "en");
 const me = computed(() => game.value?.players.find((p) => p.id === props.myId));
 const selectedGuess = ref(0);
 const selectedVote = ref("");
+const unoGames = computed(() =>
+  games.value.filter((summary) => summary.kind === "uno"),
+);
+const failed = computed(() => gameFailed.value || listFailed.value);
+function gamesOf(kind: string) {
+  return games.value.filter((summary) => summary.kind === kind);
+}
+watch(
+  games,
+  (summaries) => {
+    if (summaries.some((summary) => summary.id === selectedGameId.value))
+      return;
+    const next =
+      summaries.find(
+        (summary) => summary.kind !== "uno" && summary.phase !== "finished",
+      ) || summaries.find((summary) => summary.kind !== "uno");
+    selectedGameId.value = next?.id || null;
+  },
+  { flush: "sync" },
+);
 watch(
   [
     () => game.value?.id,
@@ -67,60 +86,38 @@ watch(
 function conceal() {
   reveal.value = false;
 }
-let timer: ReturnType<typeof setInterval>;
-let disposed = false;
-let reading = false;
-async function refresh() {
-  if (reading || busy.value) return;
-  reading = true;
-  try {
-    const result = await api<Game | null>(`/rooms/${props.roomId}/game`);
-    if (!disposed) {
-      if (!game.value || (result && result.version >= game.value.version))
-        game.value = result;
-      loaded.value = true;
-      failed.value = false;
-    }
-  } catch {
-    failed.value = true;
-  } finally {
-    reading = false;
-  }
-}
-async function act(action: string, extra: Record<string, unknown> = {}) {
-  if (busy.value) return;
-  busy.value = true;
+async function act(
+  action: string,
+  extra: Record<string, unknown> = {},
+): Promise<boolean> {
+  if (busy.value) return false;
   reveal.value = false;
-  try {
-    const g = game.value;
-    game.value = await api<Game>(`/rooms/${props.roomId}/game`, "POST", {
-      action,
-      version: g?.version || 0,
-      game_id: g?.id || "",
-      round: g?.round || 0,
-      phase: g?.phase || "",
-      tie: g?.tie || false,
-      ...extra,
-    });
-  } catch (e) {
-    const code = errorCode(e);
-    notify(t("error." + (code === "VERSION_CONFLICT" ? "GAME_PHASE" : code)));
-  } finally {
-    busy.value = false;
-    await refresh();
-  }
+  return sessionAct(action, extra);
+}
+async function createGame(kind: "undercover" | "dice") {
+  if (!props.host || creating.value || props.closed) return;
+  const created = await create({ kind, language: language.value });
+  if (created) selectedGameId.value = created.id;
+}
+function selectGame(event: Event) {
+  selectedGameId.value = (event.target as HTMLSelectElement).value || null;
+}
+async function refresh() {
+  await Promise.all([refreshList(), refreshGame()]);
+}
+function enterUno() {
+  void router.push(`/room/${props.roomId}/uno`);
+}
+function enterGuanDan() {
+  void router.push(`/room/${props.roomId}/guandan`);
 }
 onMounted(() => {
   window.addEventListener("blur", conceal);
   document.addEventListener("visibilitychange", conceal);
-  void refresh();
-  timer = setInterval(refresh, 1500);
 });
 onBeforeUnmount(() => {
   window.removeEventListener("blur", conceal);
   document.removeEventListener("visibilitychange", conceal);
-  disposed = true;
-  clearInterval(timer);
 });
 const active = computed(() => game.value && game.value.phase !== "finished");
 </script>
@@ -133,58 +130,135 @@ const active = computed(() => game.value && game.value.phase !== "finished");
       </div>
       <Users :size="28" />
     </header>
+    <div class="game-library">
+      <article>
+        <Spade :size="36" />
+        <div>
+          <h3>{{ t("game.guandan") }}</h3>
+          <p>{{ t("game.guandanHelp") }}</p>
+          <small>{{ t("game.guandanRules") }}</small>
+        </div>
+        <button class="primary" @click="enterGuanDan">
+          {{ t("game.guandanLaunch") }}
+        </button>
+      </article>
+      <article>
+        <Layers :size="36" />
+        <div>
+          <h3>{{ t("game.uno.title") }}</h3>
+          <p>{{ t("game.uno.help") }}</p>
+          <small>{{ t("game.uno.rules") }}</small>
+          <span v-if="loaded" class="tag">
+            {{ t("game.tableCount", { n: unoGames.length }) }}
+          </span>
+        </div>
+        <button class="primary" @click="enterUno">
+          {{ t("game.uno.enter") }}
+        </button>
+      </article>
+    </div>
     <p v-if="failed" role="status">
       {{ t("app.offline") }}
       <button @click="refresh">{{ t("activity.retry") }}</button>
     </p>
     <p v-if="!loaded">{{ t("app.loading") }}</p>
-    <template v-if="loaded && !active">
-      <label v-if="host" class="inline-label"
-        >{{ t("game.language")
-        }}<select v-pretty-select v-model="language">
-          <option value="zh">简体中文</option>
-          <option value="en">English</option>
-        </select></label
-      >
-      <div class="game-library">
-        <article>
-          <Fingerprint :size="36" />
-          <div>
-            <h3>{{ t("game.undercover") }}</h3>
-            <p>{{ t("game.undercoverHelp") }}</p>
-            <small>{{ t("game.undercoverRules") }}</small>
-          </div>
-          <button
-            v-if="host"
-            class="primary"
-            :disabled="busy || closed"
-            @click="act('create', { kind: 'undercover', language })"
-          >
-            {{ t("game.create") }}
-          </button>
-        </article>
-        <article>
-          <Dices :size="36" />
-          <div>
-            <h3>{{ t("game.dice") }}</h3>
-            <p>{{ t("game.diceHelp") }}</p>
-            <small>{{ t("game.diceRules") }}</small>
-          </div>
-          <button
-            v-if="host"
-            class="primary"
-            :disabled="busy || closed"
-            @click="act('create', { kind: 'dice', language })"
-          >
-            {{ t("game.create") }}
-          </button>
-        </article>
-      </div>
-      <p v-if="!host" class="muted">{{ t("game.waitHost") }}</p>
-    </template>
-    <section v-if="game" class="game-session">
+    <label v-if="host" class="inline-label"
+      >{{ t("game.language")
+      }}<select v-pretty-select v-model="language">
+        <option value="zh">简体中文</option>
+        <option value="en">English</option>
+      </select></label
+    >
+    <div class="game-library">
+      <article>
+        <Fingerprint :size="36" />
+        <div>
+          <h3>{{ t("game.undercover") }}</h3>
+          <p>{{ t("game.undercoverHelp") }}</p>
+          <small>{{ t("game.undercoverRules") }}</small>
+          <label v-if="gamesOf('undercover').length" class="game-instance-picker">
+            <span>{{ t("game.tables") }}</span>
+            <select
+              class="game-instance-select"
+              data-kind="undercover"
+              :aria-label="t('game.selectInstance', { game: t('game.undercover') })"
+              :value="game?.kind === 'undercover' ? selectedGameId : ''"
+              @change="selectGame"
+            >
+              <option value="" disabled>{{ t("game.selectTable") }}</option>
+              <option
+                v-for="summary in gamesOf('undercover')"
+                :key="summary.id"
+                :value="summary.id"
+              >
+                {{
+                  t("game.instanceOption", {
+                    id: summary.id.slice(0, 6),
+                    phase: t("game.phase." + summary.phase),
+                    seats: summary.seats,
+                  })
+                }}
+              </option>
+            </select>
+          </label>
+        </div>
+        <button
+          v-if="host"
+          class="primary"
+          :disabled="creating || closed"
+          @click="createGame('undercover')"
+        >
+          {{ t("game.create") }}
+        </button>
+      </article>
+      <article>
+        <Dices :size="36" />
+        <div>
+          <h3>{{ t("game.dice") }}</h3>
+          <p>{{ t("game.diceHelp") }}</p>
+          <small>{{ t("game.diceRules") }}</small>
+          <label v-if="gamesOf('dice').length" class="game-instance-picker">
+            <span>{{ t("game.tables") }}</span>
+            <select
+              class="game-instance-select"
+              data-kind="dice"
+              :aria-label="t('game.selectInstance', { game: t('game.dice') })"
+              :value="game?.kind === 'dice' ? selectedGameId : ''"
+              @change="selectGame"
+            >
+              <option value="" disabled>{{ t("game.selectTable") }}</option>
+              <option
+                v-for="summary in gamesOf('dice')"
+                :key="summary.id"
+                :value="summary.id"
+              >
+                {{
+                  t("game.instanceOption", {
+                    id: summary.id.slice(0, 6),
+                    phase: t("game.phase." + summary.phase),
+                    seats: summary.seats,
+                  })
+                }}
+              </option>
+            </select>
+          </label>
+        </div>
+        <button
+          v-if="host"
+          class="primary"
+          :disabled="creating || closed"
+          @click="createGame('dice')"
+        >
+          {{ t("game.create") }}
+        </button>
+      </article>
+    </div>
+    <p v-if="!host" class="muted">{{ t("game.waitHost") }}</p>
+    <section v-if="game && game.kind !== 'uno'" class="game-session">
       <div class="section-head">
-        <h3>{{ t("game." + game.kind) }}</h3>
+        <h3>
+          {{ t("game." + game.kind) }}
+        </h3>
         <span class="tag">{{ t("game.phase." + game.phase) }}</span>
       </div>
       <p v-if="game.round" class="muted">
