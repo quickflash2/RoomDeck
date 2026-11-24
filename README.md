@@ -89,6 +89,18 @@ go run ./cmd/roomdeck
 
 新增：共同画板、限时你画我猜与按职责授权的协同主持。入口及部署说明见 [画板与协同主持](docs/BOARD-AND-COHOSTS.md)。
 
+## 嵌套项目源码与致谢
+
+本仓库以源码形式收录以下三个项目，它们为对应游戏的规则设计、交互实现和技术方案提供了重要基础或参考。感谢原项目作者及所有贡献者。
+
+| 项目 | 对本仓库的贡献 | 收录目录 |
+| --- | --- | --- |
+| [GuanDanInOffice](https://github.com/LiUshin/GuanDanInOffice) | 提供基于 Node.js、React 和 Socket.IO 的局域网掼蛋实现，涵盖房间与对局管理、掼蛋规则、Bot、断线重连及技能模式等设计参考。 | `GuanDanInOffice-master/` |
+| [UNO-game-oop](https://github.com/yunwei37/UNO-game-oop) | 提供基于 Qt/C++ 的 UNO 游戏实现，涵盖游戏规则、AI 玩家、局域网联机、状态同步及界面交互等设计参考。 | `UNO-game-oop-master/` |
+| [AI 剧本杀](https://github.com/Zewang0217/ai-jubensha) | 提供基于 Spring Boot、React、多 Agent 与 RAG 的 AI 剧本杀实现，涵盖动态剧本、AI 角色、搜证、讨论推理及记忆系统等设计参考。 | `ai-jubensha-main/` |
+
+各目录保留原项目的 README、许可证或其他来源说明，相关权利归原作者及贡献者所有，具体授权以各项目随附文件为准。收录这些源码不代表其全部功能均已接入 RoomDeck 正式业务程序。
+
 ---
 
 ## 📄 许可证 / License
