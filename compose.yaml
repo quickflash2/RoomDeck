@@ -10,12 +10,27 @@ services:
     depends_on:
       media-init:
         condition: service_completed_successfully
+      guandan:
+        condition: service_started
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       BASE_URL: ${BASE_URL:-}
       LIVEKIT_INTERNAL_URL: http://livekit:7880
+      GUANDAN_INTERNAL_URL: http://guandan:3000
     restart: unless-stopped
     stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+
+  guandan:
+    image: guandan:local
+    build: ./GuanDanInOffice-master
+    volumes:
+      - guandan-data:/data
+    environment:
+      ROOMDECK_INTERNAL_URL: http://roomdeck:8080
+      GUANDAN_DATA_DIR: /data
+    restart: unless-stopped
     security_opt:
       - no-new-privileges:true
 
@@ -53,3 +68,4 @@ services:
 volumes:
   roomdeck-data:
   roomdeck-media-config:
+  guandan-data:

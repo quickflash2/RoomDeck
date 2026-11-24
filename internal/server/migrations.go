@@ -3,9 +3,10 @@ package server
 import (
 	"database/sql"
 	"fmt"
+	"time"
 )
 
-const schemaVersion = 7
+const schemaVersion = 10
 
 func migrate(db *sql.DB) error {
 	if _, err := db.Exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;"); err != nil {
@@ -104,5 +105,90 @@ PRAGMA user_version=7;`)
 			return err
 		}
 	}
+	if version < 8 {
+		var invalidIDs int
+		if err = tx.QueryRow(`SELECT COUNT(*) FROM games WHERE COALESCE(json_type(state,'$.id'),'')<>'text' OR TRIM(COALESCE(json_extract(state,'$.id'),''))=''`).Scan(&invalidIDs); err != nil {
+			return err
+		}
+		if invalidIDs != 0 {
+			return fmt.Errorf("cannot migrate %d games without a valid id", invalidIDs)
+		}
+		now := time.Now().Unix()
+		if _, err = tx.Exec(`
+CREATE TABLE games_v8(
+ room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+ game_id TEXT NOT NULL,
+ kind TEXT NOT NULL,
+ state TEXT NOT NULL,
+ created_at INTEGER NOT NULL,
+ updated_at INTEGER NOT NULL,
+ PRIMARY KEY(room_id,game_id)
+);
+INSERT INTO games_v8(room_id,game_id,kind,state,created_at,updated_at)
+ SELECT room_id,json_extract(state,'$.id'),json_extract(state,'$.kind'),state,?,? FROM games;
+DROP TABLE games;
+ALTER TABLE games_v8 RENAME TO games;
+CREATE INDEX games_room_kind_updated ON games(room_id,kind,updated_at);
+CREATE TABLE guandan_games(
+ room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+ game_id TEXT NOT NULL,
+ native_room_id TEXT NOT NULL UNIQUE,
+ created_by TEXT NOT NULL,
+ created_at INTEGER NOT NULL,
+ last_seen_at INTEGER NOT NULL DEFAULT 0,
+ closed_at INTEGER NOT NULL DEFAULT 0,
+ PRIMARY KEY(room_id,game_id)
+);
+PRAGMA user_version=8;`, now, now); err != nil {
+			return err
+		}
+		if err = checkForeignKeys(tx); err != nil {
+			return err
+		}
+	}
+	if version < 9 {
+		if _, err = tx.Exec(`
+ALTER TABLE games ADD COLUMN human_joined_at INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE guandan_games ADD COLUMN human_joined_at INTEGER NOT NULL DEFAULT 0;
+UPDATE games SET human_joined_at=created_at
+WHERE kind='uno' AND EXISTS (
+ SELECT 1 FROM json_each(games.state,'$.players') AS player
+ WHERE COALESCE(json_extract(player.value,'$.ai'),0)=0
+);
+UPDATE guandan_games SET human_joined_at=last_seen_at WHERE last_seen_at>0;
+PRAGMA user_version=9;`); err != nil {
+			return err
+		}
+	}
+	if version < 10 {
+		if _, err = tx.Exec(`
+ALTER TABLE admins ADD COLUMN role TEXT NOT NULL DEFAULT 'admin' CHECK(role IN ('admin','user'));
+ALTER TABLE rooms ADD COLUMN owner_id TEXT REFERENCES admins(id) ON DELETE CASCADE;
+CREATE INDEX rooms_owner ON rooms(owner_id);
+PRAGMA user_version=10;`); err != nil {
+			return err
+		}
+		if err = checkForeignKeys(tx); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
+}
+
+func checkForeignKeys(tx *sql.Tx) error {
+	rows, err := tx.Query("PRAGMA foreign_key_check")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	if rows.Next() {
+		var table, parent string
+		var rowID interface{}
+		var key int
+		if err = rows.Scan(&table, &rowID, &parent, &key); err != nil {
+			return err
+		}
+		return fmt.Errorf("foreign key check failed for %s row %v referencing %s", table, rowID, parent)
+	}
+	return rows.Err()
 }

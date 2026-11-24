@@ -1,5 +1,10 @@
 import {test,expect,chromium,type BrowserContext} from '@playwright/test';
 import fs from 'node:fs';
+async function act(context:BrowserContext,roomId:string,current:{id:string;version:number;round?:number;phase:string;tie?:boolean},action:string,extra:Record<string,unknown>={}){
+ const path='/rooms/'+roomId+'/games/'+current.id;
+ const response=await context.request.post('/api/v1'+path,{headers:{'X-RoomDeck-Request':'1'},data:{action,version:current.version,game_id:current.id,round:current.round||0,phase:current.phase,tie:current.tie||false,...extra}});
+ expect(response.ok(),await response.text()).toBeTruthy();return response.json();
+}
 test('games: private words, dice guesses and mobile layout',async({browser,baseURL})=>{
  const contexts:BrowserContext[]=[];
  try{
@@ -16,10 +21,11 @@ test('games: private words, dice guesses and mobile layout',async({browser,baseU
   const guest=await contexts[1].newPage();await guest.goto('/room/'+room.id);await guest.locator('#language').selectOption('zh');await guest.locator('.guest-bottom').getByRole('button',{name:'游戏',exact:true}).click();await guest.getByRole('button',{name:'我要加入',exact:true}).click();
   await expect(page.getByRole('button',{name:'Start game'})).toBeEnabled();await page.getByRole('button',{name:'Start game'}).click();await page.getByRole('button',{name:'Guess 3',exact:true}).click();await expect(page.getByRole('button',{name:'Confirm choice'})).toBeEnabled();await page.getByRole('button',{name:'Confirm choice'}).click();await guest.getByRole('button',{name:'猜 4 点',exact:true}).click();await guest.getByRole('button',{name:'确认选择'}).click();
   await expect(guest.getByText(/掷出了 [1-6] 点/)).toBeVisible();await page.screenshot({path:'test-results/dice-en.png',fullPage:true});await guest.screenshot({path:'test-results/dice-zh-mobile.png',fullPage:true});
-  const gameURL='/rooms/'+room.id+'/game';let g=await(await host.request.get('/api/v1'+gameURL)).json();g=await post(host,gameURL,{action:'cancel',version:g.version});g=await post(host,gameURL,{action:'create',kind:'undercover',language:'zh',version:g.version});
-  for(const c of contexts)g=await post(c,gameURL,{action:'join',version:g.version});g=await post(host,gameURL,{action:'start',version:g.version});
-  for(const c of contexts){const v=await(await c.request.get('/api/v1'+gameURL)).json();expect(v.mine.word).toBeTruthy();for(const p of v.players){expect(p.word).toBeUndefined();expect(p.spy).toBeUndefined();}}
-  await expect(guest.getByRole('button',{name:'查看我的词'})).toBeVisible();await guest.getByRole('button',{name:'查看我的词'}).click();await expect(guest.locator('.secret-word strong')).toBeVisible();await guest.reload();await guest.locator('.guest-bottom').getByRole('button',{name:'游戏',exact:true}).click();await expect(guest.getByRole('button',{name:'查看我的词'})).toBeVisible();await expect(guest.locator('.secret-word strong')).toHaveCount(0);
+  const collection='/rooms/'+room.id+'/games';const diceSummaries=await(await host.request.get('/api/v1'+collection+'?kind=dice')).json();expect(diceSummaries.games).toHaveLength(1);const gameURL=collection+'/'+diceSummaries.games[0].id;let g=await(await host.request.get('/api/v1'+gameURL)).json();g=await act(host,room.id,g,'cancel');g=await post(host,collection,{action:'create',kind:'undercover',language:'zh'});
+  const undercoverURL=collection+'/'+g.id;for(const c of contexts)g=await act(c,room.id,g,'join');g=await act(host,room.id,g,'start');
+  for(const c of contexts){const v=await(await c.request.get('/api/v1'+undercoverURL)).json();expect(v.mine.word).toBeTruthy();for(const p of v.players){expect(p.word).toBeUndefined();expect(p.spy).toBeUndefined();}}
+  await page.locator('.game-instance-select[data-kind="undercover"]').selectOption(g.id);await guest.locator('.game-instance-select[data-kind="undercover"]').selectOption(g.id);
+  await expect(guest.getByRole('button',{name:'查看我的词'})).toBeVisible();await guest.getByRole('button',{name:'查看我的词'}).click();await expect(guest.locator('.secret-word strong')).toBeVisible();await guest.reload();await guest.locator('.guest-bottom').getByRole('button',{name:'游戏',exact:true}).click();await guest.locator('.game-instance-select[data-kind="undercover"]').selectOption(g.id);await expect(guest.getByRole('button',{name:'查看我的词'})).toBeVisible();await expect(guest.locator('.secret-word strong')).toHaveCount(0);
   await guest.screenshot({path:'test-results/undercover-zh.png',fullPage:true});
   for(const width of [320,390,768]){await guest.setViewportSize({width,height:900});expect(await guest.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);}
  }finally{await Promise.all(contexts.map(c=>c.close()));}

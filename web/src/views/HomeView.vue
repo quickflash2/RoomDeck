@@ -9,6 +9,7 @@ import {
   LogOut,
   Clock,
   Layers,
+  Users,
 } from "lucide-vue-next";
 import { api, errorCode, notify } from "../api";
 import type { Room, Status } from "../types";
@@ -17,6 +18,7 @@ import { useFormat } from "../format";
 const { t } = useI18n();
 const { date, bytes } = useFormat();
 const router = useRouter();
+const status = ref<Status | null>(null);
 const rooms = ref<Room[]>([]),
   loading = ref(true),
   error = ref(""),
@@ -35,6 +37,7 @@ async function load() {
       await router.replace(s.setup_required ? "/setup" : "/login");
       return;
     }
+    status.value = s;
     rooms.value = await api<Room[]>("/rooms");
   } catch (e) {
     error.value = errorCode(e);
@@ -79,12 +82,21 @@ async function logout() {
   <main class="home-container">
     <div v-motion class="home-heading">
       <div>
-        <p class="eyebrow">{{ t("app.host") }}</p>
+        <p class="eyebrow">
+          {{ t(status?.role === "admin" ? "admin.role" : "admin.userRole") }}
+        </p>
         <h1>{{ t("home.title") }}</h1>
         <p class="muted">{{ t("home.subtitle") }}</p>
       </div>
       <div class="row">
-        <button
+        <RouterLink
+          v-if="status?.role === 'admin'"
+          to="/admin/users"
+          class="icon-button"
+          :aria-label="t('admin.manage')"
+          :title="t('admin.manage')"
+          ><Users :size="20" /></RouterLink
+        ><button
           class="icon-button"
           :aria-label="t('app.logout')"
           @click="logout"
@@ -199,6 +211,9 @@ async function logout() {
               }}<select v-pretty-select v-model="duration">
                 <option v-for="n in [2, 6, 12, 24]" :key="n" :value="n * 3600">
                   {{ t("home.hours", { n }) }}
+                </option>
+                <option :value="30 * 86400">
+                  {{ t("home.days", { n: 30 }) }}
                 </option>
               </select></label
             ><label

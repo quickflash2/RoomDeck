@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { watch } from "vue";
+import { computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute } from "vue-router";
 import { Languages, PanelsTopLeft } from "lucide-vue-next";
@@ -7,6 +7,9 @@ import { notification } from "./api";
 import { modalStack } from "./modalState";
 const { t, locale } = useI18n();
 const route = useRoute();
+const immersive = computed(() =>
+  /^\/room\/[^/]+\/(?:uno(?:\/[^/]+)?|guandan)\/?$/.test(route.path),
+);
 watch(
   locale,
   (v) => {
@@ -19,11 +22,12 @@ watch(
 </script>
 <template>
   <div
-    v-if="!route.path.startsWith('/display')"
+    v-if="!immersive && !route.path.startsWith('/display')"
     class="room-backdrop"
     aria-hidden="true"
   ></div>
   <header
+    v-if="!immersive"
     class="app-header"
     :class="{ 'dark-header': route.path.startsWith('/display') }"
   >

@@ -26,7 +26,7 @@ func main() {
 		res.Body.Close()
 		return
 	}
-	app, err := server.New(server.Config{DataDir: env("DATA_DIR", "data"), WebDir: env("WEB_DIR", "web/dist"), BaseURL: os.Getenv("BASE_URL"), MediaURL: os.Getenv("LIVEKIT_INTERNAL_URL"), MediaKey: os.Getenv("LIVEKIT_API_KEY"), MediaSecret: os.Getenv("LIVEKIT_API_SECRET")})
+	app, err := server.New(server.Config{DataDir: env("DATA_DIR", "data"), WebDir: env("WEB_DIR", "web/dist"), BaseURL: os.Getenv("BASE_URL"), MediaURL: os.Getenv("LIVEKIT_INTERNAL_URL"), MediaKey: os.Getenv("LIVEKIT_API_KEY"), MediaSecret: os.Getenv("LIVEKIT_API_SECRET"), GuanDanURL: env("GUANDAN_INTERNAL_URL", "http://127.0.0.1:3000")})
 	if err != nil {
 		log.Fatal(err)
 	}

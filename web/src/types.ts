@@ -17,6 +17,7 @@ export interface Settings {
 }
 export interface Room {
   id: string;
+  owner_id: string;
   code: string;
   name: string;
   state: string;
@@ -91,5 +92,89 @@ export interface Status {
   setup_required: boolean;
   authenticated: boolean;
   username: string;
+  role: "admin" | "user" | "";
   base_url: string;
+}
+export interface ManagedUser {
+  id: string;
+  username: string;
+  room_count: number;
+}
+export type UnoColor = "red" | "yellow" | "blue" | "green" | "wild";
+export type UnoCardType =
+  "number" | "skip" | "drawTwo" | "reverse" | "wild" | "wildDrawFour";
+export interface UnoCard {
+  id: number;
+  color: UnoColor;
+  type: UnoCardType;
+  value: number | null;
+}
+export interface GamePlayer {
+  id: string;
+  name: string;
+  alive?: boolean;
+  score?: number;
+  submitted?: boolean;
+  word?: string;
+  spy?: boolean;
+  guess?: number;
+  ai?: boolean;
+  card_count?: number;
+  uno_declared?: boolean;
+}
+export interface GameMine {
+  word?: string;
+  guess?: number;
+  vote?: string;
+  hand?: UnoCard[];
+  drawn_card_id?: number | null;
+  playable_card_ids?: number[];
+}
+export interface GameSummary {
+  id: string;
+  kind: string;
+  phase: string;
+  language: string;
+  version: number;
+  round: number;
+  seats: number;
+  player_count: number;
+  seated: boolean;
+  created_at: number;
+  updated_at: number;
+}
+export interface GuanDanSummary {
+  id: string;
+  player_count: number;
+  max_players: number;
+  in_game: boolean;
+  game_mode: string;
+  host_name: string;
+  available: boolean;
+  created_at: number;
+  last_seen_at: number;
+  closed_at: number | null;
+}
+export interface Game {
+  id: string;
+  kind: string;
+  phase: string;
+  language: string;
+  version: number;
+  round: number;
+  turn: number;
+  players: GamePlayer[];
+  candidates: string[];
+  tie: boolean;
+  result: string;
+  die: number;
+  mine?: GameMine | null;
+  player_count?: number;
+  current_player_id?: string;
+  current_color?: UnoColor;
+  direction?: 1 | -1;
+  deck_count?: number;
+  top_card?: UnoCard | null;
+  winner_id?: string;
+  log?: string[];
 }

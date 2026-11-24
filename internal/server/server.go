@@ -27,7 +27,7 @@ import (
 //go:embed schema.sql
 var schema string
 
-type Config struct{ DataDir, WebDir, BaseURL, MediaURL, MediaKey, MediaSecret string }
+type Config struct{ DataDir, WebDir, BaseURL, MediaURL, MediaKey, MediaSecret, GuanDanURL string }
 type Server struct {
 	db         *sql.DB
 	lockFile   *os.File
@@ -42,12 +42,14 @@ type Server struct {
 	limits     map[string]rateBucket
 	mediaMu    sync.Mutex
 	uploadMu   sync.Mutex
+	guandanMu  sync.Mutex
+	guandan    map[string]guandanSession
 }
 type rateBucket struct {
 	count int
 	reset time.Time
 }
-type principal struct{ Role, ID, Name, RoomID string }
+type principal struct{ Role, ID, Name, RoomID, AccountRole string }
 
 func New(config Config) (*Server, error) {
 	if config.DataDir == "" {
@@ -64,6 +66,13 @@ func New(config Config) (*Server, error) {
 			return nil, errors.New("BASE_URL must be an HTTP(S) origin without a path")
 		}
 		config.BaseURL = strings.TrimRight(config.BaseURL, "/")
+	}
+	if config.GuanDanURL != "" {
+		u, e := url.Parse(config.GuanDanURL)
+		if e != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+			return nil, errors.New("GUANDAN_INTERNAL_URL must be an HTTP(S) origin without a path")
+		}
+		config.GuanDanURL = strings.TrimRight(config.GuanDanURL, "/")
 	}
 	for _, d := range []string{"", "rooms", "tmp", "uploads"} {
 		if err = os.MkdirAll(filepath.Join(config.DataDir, d), 0700); err != nil {
@@ -90,9 +99,9 @@ func New(config Config) (*Server, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Server{db: db, lockFile: lockFile, config: config, hub: newHub(), ctx: ctx, cancel: cancel, limits: map[string]rateBucket{}}
+	s := &Server{db: db, lockFile: lockFile, config: config, hub: newHub(), ctx: ctx, cancel: cancel, limits: map[string]rateBucket{}, guandan: map[string]guandanSession{}}
 	var count int
-	if err = db.QueryRow("SELECT COUNT(*) FROM admins").Scan(&count); err != nil {
+	if err = db.QueryRow("SELECT COUNT(*) FROM admins WHERE role='admin'").Scan(&count); err != nil {
 		db.Close()
 		cancel()
 		return nil, err
@@ -158,6 +167,9 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/setup", s.setup)
 	m.HandleFunc("POST /api/v1/login", s.login)
 	m.HandleFunc("POST /api/v1/logout", s.logout)
+	m.HandleFunc("GET /api/v1/users", s.listUsers)
+	m.HandleFunc("POST /api/v1/users", s.createUser)
+	m.HandleFunc("DELETE /api/v1/users/{user}", s.deleteUser)
 	m.HandleFunc("GET /api/v1/rooms", s.listRooms)
 	m.HandleFunc("POST /api/v1/rooms", s.createRoom)
 	m.HandleFunc("POST /api/v1/join", s.join)
@@ -196,6 +208,18 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/rooms/{room}/board", s.boardAction)
 	m.HandleFunc("GET /api/v1/rooms/{room}/game", s.gameSnapshot)
 	m.HandleFunc("POST /api/v1/rooms/{room}/game", s.gameAction)
+	m.HandleFunc("GET /api/v1/rooms/{room}/games", s.gameList)
+	m.HandleFunc("POST /api/v1/rooms/{room}/games", s.gameCreate)
+	m.HandleFunc("GET /api/v1/rooms/{room}/games/{game}", s.gameInstanceSnapshot)
+	m.HandleFunc("POST /api/v1/rooms/{room}/games/{game}", s.gameInstanceAction)
+	m.HandleFunc("GET /api/v1/rooms/{room}/guandan-games", s.guandanGameList)
+	m.HandleFunc("POST /api/v1/rooms/{room}/guandan-games", s.guandanGameCreate)
+	m.HandleFunc("POST /api/v1/rooms/{room}/guandan-games/{gameId}/session", s.guandanGameSession)
+	m.HandleFunc("POST /api/v1/rooms/{room}/guandan-games/{gameId}/close", s.guandanGameClose)
+	m.HandleFunc("POST /api/v1/rooms/{room}/guandan-session", s.guandanSession)
+	m.HandleFunc("POST /api/v1/internal/guandan-exchange", s.guandanExchange)
+	m.HandleFunc("/guandan/", s.guandanProxy)
+	m.HandleFunc("/socket.io/", s.guandanProxy)
 	m.HandleFunc("GET /api/v1/rooms/{room}/screen", s.screenSnapshot)
 	m.HandleFunc("GET /api/v1/rooms/{room}/screen/queue", s.screenQueue)
 	m.HandleFunc("POST /api/v1/rooms/{room}/screen/queue", s.screenQueueAction)
@@ -215,7 +239,7 @@ func (s *Server) Handler() http.Handler {
 				apiError(w, 403, "ORIGIN_REJECTED")
 				return
 			}
-			if r.Header.Get("X-RoomDeck-Request") != "1" {
+			if r.Header.Get("X-RoomDeck-Request") != "1" && !strings.HasPrefix(r.URL.Path, "/socket.io/") {
 				apiError(w, 403, "CSRF_REJECTED")
 				return
 			}

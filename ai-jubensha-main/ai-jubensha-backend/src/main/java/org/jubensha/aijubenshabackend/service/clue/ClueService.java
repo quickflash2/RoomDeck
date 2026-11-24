@@ -1,0 +1,93 @@
+package org.jubensha.aijubenshabackend.service.clue;
+
+import org.jubensha.aijubenshabackend.models.entity.Clue;
+import org.jubensha.aijubenshabackend.models.entity.Script;
+import org.jubensha.aijubenshabackend.models.enums.ClueType;
+import org.jubensha.aijubenshabackend.models.enums.ClueVisibility;
+
+import java.util.List;
+import java.util.Optional;
+
+public interface ClueService {
+
+    /**
+     * 创建新线索
+     */
+    Clue createClue(Clue clue);
+
+    /**
+     * 根据ID获取线索
+     */
+    Optional<Clue> getClueById(Long id);
+
+    /**
+     * 获取所有线索
+     */
+    List<Clue> getAllClues();
+
+    /**
+     * 获取剧本的所有线索
+     */
+    List<Clue> getCluesByScript(Script script);
+
+    /**
+     * 根据剧本ID获取线索
+     */
+    List<Clue> getCluesByScriptId(Long scriptId);
+
+    /**
+     * 根据类型获取线索
+     */
+    List<Clue> getCluesByType(ClueType type);
+
+    /**
+     * 根据可见性获取线索
+     */
+    List<Clue> getCluesByVisibility(ClueVisibility visibility);
+
+    /**
+     * 根据场景获取线索
+     */
+    List<Clue> getCluesByScene(String scene);
+
+    /**
+     * 根据场景ID获取线索
+     */
+    List<Clue> getCluesBySceneId(Long sceneId);
+
+    /**
+     * 获取重要线索
+     *
+     * @param importanceThreshold 重要度阈值
+     */
+    List<Clue> getImportantClues(Integer importanceThreshold);
+
+    /**
+     * 更新线索
+     */
+    Clue updateClue(Long id, Clue clue);
+
+    /**
+     * 删除线索
+     */
+    void deleteClue(Long id);
+
+    String updateClueImage(Long id, String url);
+
+    /**
+     * 根据玩家ID获取线索
+     *
+     * @param playerId 玩家ID
+     * @return 线索列表
+     */
+    List<Clue> getCluesByPlayerId(Long playerId);
+
+    /**
+     * 获取玩家可见的线索
+     * 公开线索对所有玩家可见，私有线索仅对发现玩家可见
+     *
+     * @param playerId 玩家ID
+     * @return 可见线索列表
+     */
+    List<Clue> getVisibleClues(Long playerId);
+}

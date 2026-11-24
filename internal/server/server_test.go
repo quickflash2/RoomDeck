@@ -137,6 +137,16 @@ func TestExpiredCloseKeepsOriginalDeadline(t *testing.T) {
 	}
 }
 
+func TestCreateRoomAllowsThirtyDays(t *testing.T) {
+	f := newFixture(t)
+	var room Room
+	f.request(t, f.host, "POST", "/rooms", map[string]interface{}{"name": "Thirty days", "duration": 30 * 86400, "retention": 86400}, 201, &room)
+	if room.EndsAt-room.CreatedAt != 30*86400 {
+		t.Fatalf("room duration = %d, wanted %d", room.EndsAt-room.CreatedAt, 30*86400)
+	}
+	f.request(t, f.host, "POST", "/rooms", map[string]interface{}{"name": "Too long", "duration": 30*86400 + 1, "retention": 86400}, 400, nil)
+}
+
 func client() *http.Client {
 	j, _ := cookiejar.New(nil)
 	return &http.Client{Jar: j, Timeout: 10 * time.Second}
@@ -215,6 +225,50 @@ func (f *fixture) upload(t *testing.T, c *http.Client, data []byte, kind, name s
 	id, _ := result["id"].(string)
 	return id
 }
+func TestGuanDanLaunchExchangeAndProxy(t *testing.T) {
+	f := newFixture(t)
+	f.s.config.GuanDanURL = "http://guandan.test"
+	var launch struct{ Token string }
+	f.request(t, f.guest, "POST", f.path("/guandan-session"), nil, 201, &launch)
+	if len(launch.Token) != 48 {
+		t.Fatalf("unexpected launch token length %d", len(launch.Token))
+	}
+	var exchanged struct {
+		RoomID, PlayerName, PlayerKey string
+	}
+	f.request(t, f.other, "POST", "/internal/guandan-exchange", map[string]string{"token": launch.Token}, 200, &exchanged)
+	if exchanged.RoomID != f.room.ID || exchanged.PlayerName != "Guest 访客" || exchanged.PlayerKey == "" {
+		t.Fatalf("unexpected exchange response: %+v", exchanged)
+	}
+	firstKey := exchanged.PlayerKey
+	f.request(t, f.other, "POST", "/internal/guandan-exchange", map[string]string{"token": launch.Token}, 200, &exchanged)
+	if exchanged.PlayerKey != firstKey {
+		t.Fatal("reconnect changed the stable player key")
+	}
+	f.request(t, f.other, "POST", "/internal/guandan-exchange", map[string]string{"token": "invalid"}, 403, nil)
+	f.request(t, f.other, "POST", f.path("/guandan-session"), nil, 401, nil)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.RequestURI() != "/assets/cards.js?x=1" {
+			t.Errorf("proxied URI %s", r.URL.RequestURI())
+		}
+		w.Write([]byte("ok"))
+	}))
+	defer upstream.Close()
+	f.s.config.GuanDanURL = upstream.URL
+	res, err := f.guest.Get(f.ts.URL + "/guandan/assets/cards.js?x=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != 200 || string(body) != "ok" {
+		t.Fatalf("proxy response %d %s", res.StatusCode, body)
+	}
+	f.request(t, f.host, "POST", f.path("/close"), nil, 200, nil)
+	f.request(t, f.other, "POST", "/internal/guandan-exchange", map[string]string{"token": launch.Token}, 409, nil)
+}
+
 func TestSetupAndCSRF(t *testing.T) {
 	f := newFixture(t)
 	f.request(t, f.other, "POST", "/setup", map[string]string{"token": "wrong", "username": "x", "password": "long-enough-password"}, 403, nil)
@@ -350,8 +404,8 @@ func TestCrossRoomAndVersionConflict(t *testing.T) {
 	f := newFixture(t)
 	var second Room
 	f.request(t, f.host, "POST", "/rooms", map[string]interface{}{"name": "Other", "duration": 7200, "retention": 86400}, 201, &second)
-	f.request(t, f.guest, "GET", "/rooms/"+second.ID+"/snapshot", nil, 401, nil)
-	f.request(t, f.guest, "POST", "/rooms/"+second.ID+"/contents", map[string]string{"kind": "note", "body": "intrusion"}, 401, nil)
+	f.request(t, f.guest, "GET", "/rooms/"+second.ID+"/snapshot", nil, 403, nil)
+	f.request(t, f.guest, "POST", "/rooms/"+second.ID+"/contents", map[string]string{"kind": "note", "body": "intrusion"}, 403, nil)
 	f.request(t, f.host, "PATCH", f.path(""), map[string]interface{}{"name": f.room.Name, "settings": f.room.Settings, "retention": 86400, "version": 999}, 409, nil)
 }
 func TestExportArchiveAndPersistence(t *testing.T) {
